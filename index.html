@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GenAI Financial Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        #chat-window::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-window::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 4px;
+        }
+        .user-message {
+            background-color: #2563eb;
+            color: white;
+            border-radius: 12px 12px 0 12px;
+            max-width: 85%;
+            padding: 10px 15px;
+            margin-left: auto;
+            margin-bottom: 15px;
+            word-wrap: break-word;
+        }
+        .ai-message {
+            background-color: #f1f5f9;
+            color: #1e293b;
+            border-radius: 12px 12px 12px 0;
+            max-width: 85%;
+            padding: 10px 15px;
+            margin-right: auto;
+            margin-bottom: 15px;
+            word-wrap: break-word;
+        }
+        .ai-message img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen p-4">
+<div id="app-container" class="w-full max-w-xl bg-white shadow-2xl rounded-xl flex flex-col h-[80vh] min-h-[500px]">
+        <header class="p-4 border-b border-gray-200 flex items-center">
+            <i data-lucide="line-chart" class="w-6 h-6 text-blue-600 mr-2"></i>
+            <h1 class="text-xl font-semibold text-gray-800">GenAI-Powered Financial Assistant</h1>
+        </header>
+        <main id="chat-window" class="flex-grow p-4 overflow-y-auto space-y-4">
+            <div class="ai-message">
+                Hello! I'm your GenAI financial assistant, powered by ZenCoders. Ask me for any financial advice!
+            </div>
+        </main>
+        <div id="status-area" class="p-3 border-t border-gray-200">
+            <div id="loading-indicator" class="hidden text-sm text-gray-500 flex items-center">
+                <i data-lucide="loader-2" class="w-4 h-4 mr-2 animate-spin"></i>
+                Analyzing content...
+            </div>
+            <div id="image-preview-container" class="hidden flex items-center justify-between p-2 mb-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <div class="flex items-center">
+                    <i data-lucide="image" class="w-5 h-5 text-blue-600 mr-2"></i>
+                    <span id="image-filename" class="text-sm font-medium text-blue-700 truncate max-w-xs"></span>
+                </div>
+                <button onclick="clearImage()" class="text-blue-500 hover:text-blue-700">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-4 border-t border-gray-200 flex items-center space-x-2">
+            <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+            <button onclick="document.getElementById('file-input').click()" id="attach-btn" 
+                    class="p-2 text-gray-500 bg-gray-100 rounded-full hover:bg-gray-200 transition">
+                <i data-lucide="paperclip" class="w-5 h-5"></i>
+            </button>
+            <button id="voice-btn" class="p-2 text-gray-500 bg-gray-100 rounded-full hover:bg-gray-200 transition" disabled title="Speech Recognition requires HTTPS and may not work in all browsers/environments.">
+                <i data-lucide="mic" class="w-5 h-5"></i>
+            </button>
+            <input 
+                type="text" 
+                id="ask-box" 
+                placeholder="Type Here ;)" 
+                class="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500 transition" 
+                onkeydown="handleKeyDown(event)"
+            />
+            <button id="send-btn" onclick="sendMessage()" 
+                    class="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:bg-gray-400">
+                <i data-lucide="send" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </div>
+<script>
+const apiKey = "AIzaSyCt1L9Z23fSZ5UhpzR-ZvY5pud9Ygno4hY";
+const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+        const chatWindow = document.getElementById("chat-window");
+        const askBox = document.getElementById("ask-box");
+        const sendBtn = document.getElementById("send-btn");
+        const voiceBtn = document.getElementById("voice-btn");
+        const loadingIndicator = document.getElementById("loading-indicator");
+        const imagePreviewContainer = document.getElementById("image-preview-container");
+        const imageFilenameDisplay = document.getElementById("image-filename");
+        let base64Image = null;
+        let imageMimeType = null;
+        let isSending = false;
+        lucide.createIcons();
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+            });
+        }
+        function appendMessage(content, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type === 'user' ? 'user-message' : 'ai-message';
+            messageDiv.innerHTML = content;
+            chatWindow.appendChild(messageDiv);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+            return messageDiv;
+        }
+        function showLoading() {
+            isSending = true;
+            sendBtn.disabled = true;
+            askBox.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+        }
+        function hideLoading() {
+            isSending = false;
+            sendBtn.disabled = false;
+            askBox.disabled = false;
+            loadingIndicator.classList.add('hidden');
+        }
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                clearImage();
+                return;
+            }
+            if (!file.type.startsWith('image/')) {
+                console.error("Only image files are supported.");
+                clearImage();
+                return;
+            }
+            imageFilenameDisplay.textContent = file.name;
+            imagePreviewContainer.classList.remove('hidden');
+            imageMimeType = file.type;
+            fileToBase64(file).then(base64 => {
+                base64Image = base64;
+            }).catch(e => {
+                console.error("Error reading file:", e);
+                clearImage();
+            });
+        }
+        function clearImage() {
+            base64Image = null;
+            imageMimeType = null;
+            document.getElementById('file-input').value = null; 
+            imagePreviewContainer.classList.add('hidden');
+        }
+        async function sendMessage() {
+            if (isSending) return;
+            let userQuery = askBox.value.trim();
+            const hasImage = base64Image !== null;
+            if (!userQuery && !hasImage) return;
+            const displayQuery = userQuery || "Image Analysis Request";
+            appendMessage(displayQuery, 'user');
+            askBox.value = "";
+            clearImage(); 
+            showLoading();
+            const aiMessageDiv = appendMessage("...", 'ai');
+            const parts = [];
+            if (userQuery) {
+                parts.push({ text: userQuery });
+            }
+            if (hasImage) {
+                parts.push({
+                    inlineData: {
+                        mimeType: imageMimeType,
+                        data: base64Image
+                    }
+                });
+            }
+            const payload = {
+                contents: [{ parts: parts }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: {
+                    parts: [{ text: "You are a friendly, concise, and helpful financial assistant. Analyze the user's query or the provided financial image/chart and provide a clear, actionable summary. Keep responses professional and relevant to finance or general knowledge." }]
+                },
+            };
+            const maxRetries = 3;
+            let responseText = "Sorry, I encountered an error. Please try again.";
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    const candidate = result.candidates?.[0];
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        responseText = candidate.content.parts[0].text;
+                        break;
+                    } else {
+                        throw new Error("API response content missing.");
+                    }
+                } catch (error) {
+                    console.error(`Attempt ${attempt + 1} failed:`, error);
+                    if (attempt < maxRetries - 1) {
+                        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            }
+        aiMessageDiv.innerHTML = responseText.replace(/\n/g, '<br>');
+            hideLoading();
+        }function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); 
+                sendMessage();
+            }
+        }
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let isListening = false;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+            voiceBtn.disabled = false;
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                askBox.value = transcript;
+                if (transcript.trim() !== '') {
+                    sendMessage();
+                }
+                stopListening();
+            };
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                askBox.placeholder = "Error, try speaking again.";
+                stopListening();
+            };
+            recognition.onend = () => {
+                if(isListening) {
+                    stopListening();
+                }
+            };
+            voiceBtn.onclick = () => {
+                if (isListening) {
+                    stopListening();
+                } else {
+                    startListening();
+                }
+            };
+        } else {
+            console.warn("Speech Recognition API not supported in this browser/environment.");
+        }
+        function startListening() {
+            if (!recognition) return;
+            isListening = true;
+            voiceBtn.classList.remove('bg-gray-100');
+            voiceBtn.classList.add('bg-red-500', 'text-white');
+            askBox.placeholder = "Listening... Speak now.";
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error("Recognition start failed, often due to permission issues.", e);
+                stopListening();
+            }
+        }
+        function stopListening() {
+            if (!recognition) return;
+            isListening = false;
+            voiceBtn.classList.remove('bg-red-500', 'text-white');
+            voiceBtn.classList.add('bg-gray-100');
+            askBox.placeholder = "Ask or describe your chart...";
+            try {
+                recognition.stop();
+            } catch (e) {
+            }
+        }
+        window.onload = () => {
+            lucide.createIcons();
+        };
+    </script>
+</body>
+</html>
